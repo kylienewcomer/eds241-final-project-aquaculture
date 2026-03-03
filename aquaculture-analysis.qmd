@@ -5,6 +5,16 @@ format: html
 
 ```{r}
 library(tidyverse)
+library(here)
+library(janitor)
+library(estimatr)  
+library(performance)
+library(jtools)
+library(gt)
+library(gtsummary)
+library(interactions)
+library(ggridges)
+library(ggbeeswarm)
 
 minnows <- read_csv(here::here("data", "Minnows_Aquaculture_Rennie19.csv")) %>% 
   janitor::clean_names()
@@ -14,17 +24,90 @@ minnows <- read_csv(here::here("data", "Minnows_Aquaculture_Rennie19.csv")) %>%
 ```{r}
 new_cols <- c("redbell_dace", "finescale_dace", "fathead_minnow", "pearl_dace", "slimy_sculpin")
 
+
+unique(minnows$lake)
+
 minnows <- minnows %>% 
   rename(redbell_dace = f182,
          finescale_dace = f183,
          fathead_minnow = f209,
          pearl_dace = f214,
          slimy_sculpin = f382
-         )
+         ) %>% 
+  mutate(treat = as.factor(case_when(
+    lake == 375 ~ 1,
+    TRUE ~ 0
+  )))
+```
+
+```{r}
+minnow_counts <- minnows %>% 
+  group_by(treat, year, season) %>% 
+  summarize(counts = mean(minnows, na.rm = TRUE))
+```
+
+```{r}
+ggplot(minnow_counts, aes(x = counts, y = treat, fill = season)) +
+    geom_density_ridges() +
+    scale_fill_manual(values = c("lightblue", "coral2")) +
+    scale_y_discrete(labels = c("Aquaculture", "Control")) +
+    theme_classic()  +
+    theme(
+          plot.caption = element_text(hjust = 0.5)) +
+    labs(x = "Mean Size (mm)",
+         y = " ",
+         title = "Distirbution of Minnow Counts by Treatment and Season ")
+```
+```{r}
+m1_ols <- lm(
+    minnows ~ treat,
+    data = minnows
+)
+
+summ(m1_ols, model.fit = FALSE) 
+```
+```{r}
+check_model(m1_ols,  check = "qq" )
+```
+
+```{r}
+check_model(m1_ols, check = "normality")
+```
+
+```{r}
+check_model(m1_ols, check = "homogeneity")
+```
+
+```{r}
+check_model(m1_ols, check = "pp_check")
+```
+```{r}
+m2_pois <- glm(minnows ~ treat,
+               family = poisson(link = "log"),
+               data = minnows)
+summ(m2_pois, model.fit = FALSE)
 ```
 
 
 ```{r}
+check_model(m2_pois)
+```
 
+
+
+```{r}
+library(MASS)
+fe_counts <- minnows %>% 
+    mutate(year=as_factor(year))
+    
+m5_fixedeffs <- glm(
+    minnows ~ 
+        treat +
+        year +
+      season + 
+        treat*year,
+    data = fe_counts)
+
+summ(m5_fixedeffs, model.fit = FALSE)
 ```
 
