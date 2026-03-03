@@ -1,0 +1,30 @@
+---
+title: "Aquaculture Analysis"
+format: html
+---
+
+```{r}
+library(tidyverse)
+
+minnows <- read_csv(here::here("data", "Minnows_Aquaculture_Rennie19.csv")) %>% 
+  janitor::clean_names()
+
+```
+
+```{r}
+new_cols <- c("redbell_dace", "finescale_dace", "fathead_minnow", "pearl_dace", "slimy_sculpin")
+
+minnows <- minnows %>% 
+  rename(redbell_dace = f182,
+         finescale_dace = f183,
+         fathead_minnow = f209,
+         pearl_dace = f214,
+         slimy_sculpin = f382
+         )
+```
+
+
+```{r}
+
+```
+
