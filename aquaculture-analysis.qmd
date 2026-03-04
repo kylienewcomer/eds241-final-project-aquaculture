@@ -22,92 +22,157 @@ minnows <- read_csv(here::here("data", "Minnows_Aquaculture_Rennie19.csv")) %>%
 ```
 
 ```{r}
-new_cols <- c("redbell_dace", "finescale_dace", "fathead_minnow", "pearl_dace", "slimy_sculpin")
 
-
-unique(minnows$lake)
-
-minnows <- minnows %>% 
+aquaculture <- minnows %>% 
   rename(redbell_dace = f182,
          finescale_dace = f183,
          fathead_minnow = f209,
          pearl_dace = f214,
          slimy_sculpin = f382
          ) %>% 
-  mutate(treat = as.factor(case_when(
+  mutate(treat = case_when(
     lake == 375 ~ 1,
-    TRUE ~ 0
-  )))
+    TRUE ~ 0),
+  is_post = case_when(
+      year < 2003  ~ 0,
+      year >= 2003 ~ 1
+    ))  %>% 
+  drop_na(minnows)
 ```
 
 ```{r}
-minnow_counts <- minnows %>% 
-  group_by(treat, year, season) %>% 
-  summarize(counts = mean(minnows, na.rm = TRUE))
+### Mean cpue per lake/year/season, sqrt-transformed ###
+mean_cpue <- aquaculture %>%
+  group_by(treat, year, season, is_post) %>%
+  summarise(mean_cpue = mean(minnows), .groups = "drop") %>%
+  # Sqrt to normalize residuals 
+  mutate(sqrt_cpue = sqrt(mean_cpue))
+
 ```
 
 ```{r}
-ggplot(minnow_counts, aes(x = counts, y = treat, fill = season)) +
-    geom_density_ridges() +
-    scale_fill_manual(values = c("lightblue", "coral2")) +
-    scale_y_discrete(labels = c("Aquaculture", "Control")) +
-    theme_classic()  +
-    theme(
-          plot.caption = element_text(hjust = 0.5)) +
-    labs(x = "Mean Size (mm)",
-         y = " ",
-         title = "Distirbution of Minnow Counts by Treatment and Season ")
-```
-```{r}
-m1_ols <- lm(
-    minnows ~ treat,
-    data = minnows
-)
+# Prepare plot data 
+plot_data <- aquaculture %>%
+  group_by(treat, year, season) %>%
+  summarise(
+    mean_cpue = mean(minnows),
+    se_cpue   = sd(minnows) / sqrt(n()),
+    .groups  = "drop"
+  )
 
-summ(m1_ols, model.fit = FALSE) 
-```
-```{r}
-check_model(m1_ols,  check = "qq" )
-```
+season_labels <- c(aSpring = "Spring", zFall = "Fall") # Create clean seasons label
 
-```{r}
-check_model(m1_ols, check = "normality")
-```
-
-```{r}
-check_model(m1_ols, check = "homogeneity")
-```
-
-```{r}
-check_model(m1_ols, check = "pp_check")
-```
-```{r}
-m2_pois <- glm(minnows ~ treat,
-               family = poisson(link = "log"),
-               data = minnows)
-summ(m2_pois, model.fit = FALSE)
+ggplot(plot_data, aes(x = year, y = mean_cpue, color = factor(treat))) +
+  annotate("rect", xmin = 2003, xmax = 2007,
+           ymin = -Inf, ymax = Inf, fill = "grey80", alpha = 0.5) +
+  geom_line(aes(linetype = treat)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean_cpue - se_cpue,
+                    ymax = mean_cpue + se_cpue), width = 0.3) +
+  scale_linetype_manual(values = c("dashed", "solid"),
+                        labels = c("Control", "Treated")) +
+  scale_color_manual(values = c("black", "red"),
+                     labels = c("Control", "Treated")) +
+  facet_wrap(~ season, scales = "free_y",
+             labeller = labeller(season = season_labels)) +
+  labs(x = "Year", 
+       y = "Average catch per unit effort",
+       linetype = "",
+       color = "") +
+  theme_classic()
 ```
 
 
 ```{r}
-check_model(m2_pois)
+# BACI ANOVA for spring
+spring <- mean_cpue %>% filter(season == "aSpring")%>% 
+  mutate(treat = as.factor(treat),
+         is_post = as.factor(is_post))
+mod_spring <- aov(sqrt_cpue ~ treat * is_post, data = spring)
+summary(mod_spring)
+TukeyHSD(mod_spring)
 ```
-
-
-
+No significant terms for Spring ANOVA 
+`treat` no baseline differences in both lakes during spring 
+`is_post` spring minnow abundance did not after introduction of aquaculture
+`treat:is_post` The treated lake did not respond differently than the control lake across periods in spring. No aquaculture effect. 
+Spring Tukey HSD: 
+Confirms no significant effect anywhere
 ```{r}
-library(MASS)
-fe_counts <- minnows %>% 
-    mutate(year=as_factor(year))
-    
-m5_fixedeffs <- glm(
-    minnows ~ 
-        treat +
-        year +
-      season + 
-        treat*year,
-    data = fe_counts)
-
-summ(m5_fixedeffs, model.fit = FALSE)
+# BACI ANOVA for fall
+fall <- mean_cpue %>% filter(season == "zFall") %>% 
+  mutate(treat = as.factor(treat),
+         is_post = as.factor(is_post))
+mod_fall <- aov(sqrt_cpue ~ treat * is_post, data = fall)
+summary(mod_fall)
+TukeyHSD(mod_fall)
 ```
+All significant terms for Spring ANOVA 
+`treat` significant differences in both lakes during fall 
+`is_post` fall minnow abundance changed over time in both lakes 
+`treat:is_post` lake 375 responded differently than lake 373 across periods in spring. Significant aquaculture effect. 
+Fall Tukey HSD: 
+`$treat` The control lake is 3.29409 sqrt CPUE units higher 
+`$is_post`: Post treatment was significantly higher than before; fall abundance spiked across both lakes in aquaculture years. No other significant term 
+`treat:is_post` all significant terms
+```{r}
+### Causal identification: parallel trends test
+# Restrict to pre-treatment period only
+pre_aqua <- mean_cpue  %>% 
+  filter(is_post == 0) %>%
+  mutate(season = factor(season, levels = c("zFall", "aSpring")))
+# A significant lake:year interaction would violate parallel trends
+mod_pt <- lm(sqrt_cpue ~ treat * is_post + season, data = pre_aqua)
+summary(mod_pt)
+# Visual parallel trends check
+pre_aqua %>%
+  ggplot(aes(x = year, y = mean_cpue,
+             color = factor(treat),
+             linetype = factor(treat))) +
+  geom_line() +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, size = 0.5) +
+  scale_color_manual(values = c("black", "red"),
+                     labels = c("Control", "Treated")) +
+  scale_linetype_manual(values = c("dashed", "solid"),
+                        labels = c("Control", "Treated")) +
+  facet_wrap(~ season, scales = "free_y",
+             labeller = labeller(season = season_labels)) +
+  labs(x = "Year", y = "Mean cpue (fish per net days)",
+       color = "Lake", linetype = "Lake",
+       title = "Pre-treatment trends (parallel trends check)") +
+  theme_classic()
+```
+
+### Difference-in-difference 
+```{r}
+library(car)
+# DiD regression
+
+mod_did <- lm(sqrt_cpue ~ treat * is_post + season, data = mean_cpue)
+
+### Statistical assumption tests
+# 1. Residuals vs fitted (homoscedasticity)
+# which specifies type of diagnostic plot
+plot(mod_did, which = 1) 
+# 2. QQ-plot (normality)
+plot(mod_did, which = 2)
+# 3. Cook's distance (influential points)
+plot(mod_did, which = 4)
+# 4. Autocorrelation (Durbin-Watson)
+durbinWatsonTest(mod_did)
+
+summary(mod_did)
+```
+From `mod_did` summary : 
+`treat` 0.2655 , p = 0.829. No significant baseline difference between lakes before treatment. 
+`is_post` 0.3466, p = 0.7347. No significant change in CPUE after treatment
+`seasonzFall` **3.1815, p =  0.0001**  significantly higher CPUE than spring regardless of treatment 
+`treat:is_post` 2.6080, p = 0.100356. There is a 2.6 increase in CPUE of the treated lake in the time period after treatment began
+
+R2 = 0.3191 - 32% of variation of minnow CPUE across lake/year/season is explained by model. 
+F = 6.986, p = 9.292e-05. Model significant - explains more variance than just using mean CPUE as prediction. 
+
+
+
 
