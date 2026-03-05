@@ -1,0 +1,232 @@
+---
+title: "Aquaculture Analysis"
+format: html
+editor: visual
+---
+
+## Setup
+
+```{r}
+#| message: false
+#| warning: false
+library(tidyverse)
+library(here)
+library(janitor)
+library(estimatr)
+library(performance)
+library(jtools)
+library(gt)
+library(gtsummary)
+library(interactions)
+library(car)
+```
+
+## Data Wrangling
+
+```{r}
+#| message: false
+#| warning: false
+minnows <- read_csv(here::here("data", "Minnows_Aquaculture_Rennie19.csv")) %>%
+  janitor::clean_names()
+
+aquaculture <- minnows %>%
+  # Adding fish sp names to ambiguous columns 
+  rename(
+    redbell_dace   = f182,
+    finescale_dace = f183,
+    fathead_minnow = f209,
+    pearl_dace     = f214,
+    slimy_sculpin  = f382
+  ) %>%
+  # Adding treatment column
+  mutate(
+    treat = case_when(lake == 375 ~ 1, TRUE ~ 0),
+  # Add period column 
+    period = case_when(
+      year < 2003  ~ "Before",
+      year <= 2007 ~ "During",
+      TRUE         ~ "After"), 
+  # Renaming season row names to be cleaner 
+    season = case_when(season == "aSpring" ~ "Spring",
+                       season == "zFall" ~ "Fall"),
+  # Always order from Fall to Spring 
+    season = fct_relevel(season, "Fall", "Spring")) %>%
+  # Drop na values from minnow column 
+  drop_na(minnows)
+
+# Mean cpue per lake/year/season, sqrt-transformed
+mean_cpue <- aquaculture %>%
+  group_by(treat, year, season, period) %>%
+  summarise(mean_cpue = mean(minnows), .groups = "drop") %>%
+  mutate(
+    sqrt_cpue = sqrt(mean_cpue))
+
+# Prepare plot data
+plot_data <- aquaculture %>%
+  group_by(treat, year, season) %>%
+  summarise(
+    mean_cpue = mean(minnows),
+    se_cpue   = sd(minnows) / sqrt(n()),
+    .groups   = "drop"
+  )
+```
+
+## Time Series Plot
+
+```{r}
+ggplot(plot_data, aes(x = year, y = mean_cpue, color = factor(treat))) +
+  annotate("rect", xmin = 2003, xmax = 2007,
+           ymin = -Inf, ymax = Inf, fill = "grey80", alpha = 0.5) +
+  geom_line(aes(linetype = factor(treat))) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean_cpue - se_cpue,
+                    ymax = mean_cpue + se_cpue), width = 0.3) +
+  scale_linetype_manual(values = c("dashed", "solid"),
+                        labels = c("Control", "Treated")) +
+  scale_color_manual(values = c("black", "red"),
+                     labels = c("Control", "Treated")) +
+  facet_wrap(~ season, scales = "free_y") +
+  labs(x = "Year", y = "Average catch per unit effort",
+       linetype = "", color = "") +
+  theme_classic()
+```
+
+## BACI ANOVA
+
+### Spring
+
+```{r}
+spring <- mean_cpue %>%
+  filter(season == "Spring") %>%
+  mutate(treat = as.factor(treat), period = as.factor(period))
+
+mod_spring <- aov(sqrt_cpue ~ treat * period, data = spring)
+summary(mod_spring)
+TukeyHSD(mod_spring)
+```
+
+No significant terms for Spring ANOVA
+
+`treat` no baseline differences in both lakes during spring
+
+`period` spring minnow abundance did not change after introduction of aquaculture
+
+`treat:period` The treated lake did not respond differently than the control lake across periods in spring. No aquaculture effect.
+
+Spring Tukey HSD: Confirms no significant effect anywhere
+
+### Fall
+
+```{r}
+fall <- mean_cpue %>%
+  filter(season == "Fall") %>%
+  mutate(treat = as.factor(treat), period = as.factor(period))
+
+mod_fall <- aov(sqrt_cpue ~ treat * period, data = fall)
+summary(mod_fall)
+TukeyHSD(mod_fall)
+```
+
+All significant terms for Spring ANOVA:
+
+`treat` significant differences in both lakes during fall
+
+`period` fall minnow abundance changed over time in both lakes
+
+`treat:period` lake 375 responded differently than lake 373 across periods in spring. Significant aquaculture effect.
+
+Fall Tukey HSD:
+
+`$treat` The control lake is 3.29409 sqrt CPUE units higher
+
+`$period`: Post treatment was significantly higher than before; fall abundance spiked across both lakes in aquaculture years. No other significant term
+
+`treat:period` significant terms:
+
+`1:During-0: After`
+
+`1:During-1: After`
+
+`1:During-0: Before`
+
+`1:During-1: Before`
+
+`1:During-0: During`
+
+## Causal Identification: Parallel Trends Test
+
+Restricting to the Before period only, we test whether the two lakes were already trending differently prior to aquaculture. A significant `treat:year` interaction would indicate diverging pre-treatment trends, violating the parallel trends assumption.
+
+```{r}
+pre_only <- mean_cpue %>%
+  filter(period == "Before")
+
+mod_pt <- lm(sqrt_cpue ~ treat * year + season, data = pre_only)
+summary(mod_pt)
+```
+
+```{r}
+pre_only %>%
+  ggplot(aes(x = year, y = mean_cpue,
+             color = factor(treat), linetype = factor(treat))) +
+  geom_line() +
+  geom_point() +
+  scale_color_manual(values = c("black", "red"),
+                     labels = c("Control", "Treated")) +
+  scale_linetype_manual(values = c("dashed", "solid"),
+                        labels = c("Control", "Treated")) +
+  facet_wrap(~ season, scales = "free_y") +
+  labs(x = "Year", y = "Mean cpue (fish per net days)",
+       color = "Lake", linetype = "Lake",
+       title = "Pre-treatment trends (parallel trends check)") +
+  theme_classic()
+```
+
+## Difference-in-Differences
+
+### Before and During
+
+```{r}
+pre_aqua <- mean_cpue %>%
+  filter(period != "After")
+
+mod_did_pre <- lm(sqrt_cpue ~ treat * period + season, data = pre_aqua)
+
+plot(mod_did_pre, which = 1)  # Residuals vs fitted
+plot(mod_did_pre, which = 2)  # QQ-plot
+plot(mod_did_pre, which = 4)  # Cook's distance
+durbinWatsonTest(mod_did_pre) # Autocorrelation
+summary(mod_did_pre)
+```
+
+### During and After
+
+```{r}
+post_aqua <- mean_cpue %>%
+  filter(period != "Before")
+
+mod_did_post <- lm(sqrt_cpue ~ treat * period + season, data = post_aqua)
+
+plot(mod_did_post, which = 1)
+plot(mod_did_post, which = 2)
+plot(mod_did_post, which = 4)
+durbinWatsonTest(mod_did_post)
+summary(mod_did_post)
+```
+
+```{r}
+post_aqua %>%
+  ggplot(aes(x = year, y = mean_cpue,
+             color = factor(treat), linetype = factor(treat))) +
+  geom_line() +
+  geom_point() +
+  scale_color_manual(values = c("black", "red"),
+                     labels = c("Control", "Treated")) +
+  scale_linetype_manual(values = c("dashed", "solid"),
+                        labels = c("Control", "Treated")) +
+  facet_wrap(~ season, scales = "free_y") +
+  labs(x = "Year", y = "Mean cpue (fish per net days)",
+       color = "Lake", linetype = "Lake",
+       title = "Post-treatment trends") +
+  theme_classic()
+```
