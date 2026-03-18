@@ -2,8 +2,6 @@
 title: "Replicating the Aquaculture Impact Analysis on Minnow Communities"
 author: "Kylie Newcomer, Joaquin Sandoval, and Grace Bryan"
 date: "2026-03-06"
-format: html
-editor: visual
 ---
 
 ## Introduction
@@ -29,6 +27,9 @@ Two lakes are used in this analysis:
 Minnow CPUE values are aggregated by lake, year, and season to produce an average abundance estimate for each sampling period. Because abundance data are often right-skewed, the CPUE values are square-root transformed prior to analysis to stabilize variance and better satisfy model assumptions.
 
 The following code imports the dataset and constructs the variables used in the analysis.
+=======
+## Setup
+
 
 ```{r}
 #| message: false
@@ -54,6 +55,8 @@ Key variables include:
 -   period - before, during, and after aquaculture
 
 -   season - spring or fall sampling
+=======
+## Data Wrangling
 
 ```{r}
 #| message: false
@@ -109,11 +112,9 @@ Before estimating statistical models, it is useful to visualize how the minnow a
 
 ```{r}
 
-#did <- 
-  ggplot(plot_data, aes(x = year, y = mean_cpue, color = factor(treat))) +
+ggplot(plot_data, aes(x = year, y = mean_cpue, color = factor(treat))) +
   annotate("rect", xmin = 2003, xmax = 2007,
            ymin = -Inf, ymax = Inf, fill = "grey80", alpha = 0.5) +
-  annotate("text", label = "Treatment\nperiod", x = 2007, y= 600) +
   geom_line(aes(linetype = factor(treat))) +
   geom_point(size = 2) +
   geom_errorbar(aes(ymin = mean_cpue - se_cpue,
@@ -126,7 +127,7 @@ Before estimating statistical models, it is useful to visualize how the minnow a
   labs(x = "Year", y = "Average catch per unit effort",
        linetype = "", color = "") +
   theme_classic()
-#ggsave("did.png", did, height = 6, width = 8)
+
 ```
 
 Figure 1 displays the time series of average minnow CPUE for the treatment and control lakes. The shaded region indicates the period during which aquaculture operations were active.
@@ -143,6 +144,7 @@ In its simplest form, the BACI framework assumes that the control site provides 
 
 ### Spring BACI Model
 
+
 ```{r}
 spring <- mean_cpue %>%
   filter(season == "Spring") %>%
@@ -153,11 +155,25 @@ summary(mod_spring)
 TukeyHSD(mod_spring)
 ```
 
+
 The results from the spring BACI model show no statistically significant effects for treatment, period, or their interaction. In other words, there is little evidence that minnow abundance in the treated lake changed differently from the control lake during the spring sampling period.
 
 Post-hoc comparisons from the Tukey test also fail to detect significant differences across periods.
 
 ### Fall BACI Model
+
+No significant terms for Spring ANOVA
+
+`treat` no baseline differences in both lakes during spring
+
+`period` spring minnow abundance did not change after introduction of aquaculture
+
+`treat:period` The treated lake did not respond differently than the control lake across periods in spring. No aquaculture effect.
+
+Spring Tukey HSD: Confirms no significant effect anywhere
+
+### Fall
+
 
 ```{r}
 fall <- mean_cpue %>%
@@ -191,11 +207,45 @@ We test this by estimating a regression model that interacts treatment status wi
 
 Testing this assumption is particularly important in the present study because only one treated lake is available. With such limited replication, evidence that the lakes followed similar pre-treatment trajectories helps strengthen the causal interpretation of any post-treatment divergence.
 
+All significant terms for Spring ANOVA:
+
+`treat` significant differences in both lakes during fall
+
+`period` fall minnow abundance changed over time in both lakes
+
+`treat:period` lake 375 responded differently than lake 373 across periods in spring. Significant aquaculture effect.
+
+Fall Tukey HSD:
+
+`$treat` The control lake is 3.29409 sqrt CPUE units higher
+
+`$period`: Post treatment was significantly higher than before; fall abundance spiked across both lakes in aquaculture years. No other significant term
+
+`treat:period` significant terms:
+
+`1:During-0: After`
+
+`1:During-1: After`
+
+`1:During-0: Before`
+
+`1:During-1: Before`
+
+`1:During-0: During`
+
+## Causal Identification: Parallel Trends Test
+
+Restricting to the Before period only, we test whether the two lakes were already trending differently prior to aquaculture. A significant `treat:year` interaction would indicate diverging pre-treatment trends, violating the parallel trends assumption.
+
+
 ```{r}
 pre_only <- mean_cpue %>%
   filter(period == "Before")
 
 mod_pt <- lm(sqrt_cpue ~ treat * factor(year) + season, data = pre_only)
+
+mod_pt <- lm(sqrt_cpue ~ treat * year + season, data = pre_only)
+
 summary(mod_pt)
 ```
 
@@ -215,7 +265,6 @@ pre_only %>%
        title = "Pre-treatment trends (parallel trends check)") +
   theme_classic()
 
-#ggsave("parallelltrends.png", parallel_trends, height = 6, width = 8)
 ```
 
 
@@ -331,3 +380,55 @@ However, the study still faces an important structural limitation: the experimen
 Despite this limitation, the combination of visualization, BACI modeling, parallel trends testing, and Difference-in-Differences analysis provides a coherent and transparent evaluation of the aquaculture experiment.
 
 Overall, the results illustrate how combining BACI designs with a DiD framework can strengthen causal interpretation in ecological impact studies. While the analysis is limited by the presence of only a single treatment lake, the parallel trends test and the separation of during- and post-treatment periods provide a more transparent evaluation of how aquaculture activity may influence fish community dynamics.
+=======
+```
+
+## Difference-in-Differences
+
+### Before and During
+
+```{r}
+pre_aqua <- mean_cpue %>%
+  filter(period != "After")
+
+mod_did_pre <- lm(sqrt_cpue ~ treat * period + season, data = pre_aqua)
+
+plot(mod_did_pre, which = 1)  # Residuals vs fitted
+plot(mod_did_pre, which = 2)  # QQ-plot
+plot(mod_did_pre, which = 4)  # Cook's distance
+durbinWatsonTest(mod_did_pre) # Autocorrelation
+summary(mod_did_pre)
+```
+
+### During and After
+
+```{r}
+post_aqua <- mean_cpue %>%
+  filter(period != "Before")
+
+mod_did_post <- lm(sqrt_cpue ~ treat * period + season, data = post_aqua)
+
+plot(mod_did_post, which = 1)
+plot(mod_did_post, which = 2)
+plot(mod_did_post, which = 4)
+durbinWatsonTest(mod_did_post)
+summary(mod_did_post)
+```
+
+```{r}
+post_aqua %>%
+  ggplot(aes(x = year, y = mean_cpue,
+             color = factor(treat), linetype = factor(treat))) +
+  geom_line() +
+  geom_point() +
+  scale_color_manual(values = c("black", "red"),
+                     labels = c("Control", "Treated")) +
+  scale_linetype_manual(values = c("dashed", "solid"),
+                        labels = c("Control", "Treated")) +
+  facet_wrap(~ season, scales = "free_y") +
+  labs(x = "Year", y = "Mean cpue (fish per net days)",
+       color = "Lake", linetype = "Lake",
+       title = "Post-treatment trends") +
+  theme_classic()
+```
+
