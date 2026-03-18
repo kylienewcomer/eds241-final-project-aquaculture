@@ -115,6 +115,8 @@ Before estimating statistical models, it is useful to visualize how the minnow a
 ggplot(plot_data, aes(x = year, y = mean_cpue, color = factor(treat))) +
   annotate("rect", xmin = 2003, xmax = 2007,
            ymin = -Inf, ymax = Inf, fill = "grey80", alpha = 0.5) +
+  annotate("text", x = 2003, label = "Aquaculture period",
+           y = -5, size = 3) +
   geom_line(aes(linetype = factor(treat))) +
   geom_point(size = 2) +
   geom_errorbar(aes(ymin = mean_cpue - se_cpue,
@@ -242,9 +244,8 @@ Restricting to the Before period only, we test whether the two lakes were alread
 pre_only <- mean_cpue %>%
   filter(period == "Before")
 
-mod_pt <- lm(sqrt_cpue ~ treat * factor(year) + season, data = pre_only)
 
-mod_pt <- lm(sqrt_cpue ~ treat * year + season, data = pre_only)
+mod_pt <- lm(sqrt_cpue ~ treat * factor(year) + season, data = pre_only)
 
 summary(mod_pt)
 ```
@@ -317,10 +318,51 @@ summary(mod_did_pre_spring)
 ```
 ### Robustness Check
 Adjusting the window
+
+```{r}
+pre_aqua_fall_mod <- mean_cpue %>%
+  filter(period != "After",
+         season == "Fall") %>% 
+  mutate(period = case_when(
+      year < 2001  ~ "Before",
+      year <= 2005 ~ "During",
+      TRUE ~ "After"))
+
+mod_did_pre_fall_mod <- lm(sqrt_cpue ~ treat * period + factor(year), data = pre_aqua_fall_mod)
+
+# plot(mod_did_pre_spring, which = 1)  # Residuals vs fitted
+# plot(mod_did_pre_spring, which = 2)  # QQ-plot
+# plot(mod_did_pre_spring, which = 4)  # Cook's distance
+# durbinWatsonTest(mod_did_pre_spring) # Autocorrelation
+summary(mod_did_pre_fall_mod)
+```
+
+```{r}
+pre_aqua_spring_mod <- mean_cpue %>%
+  filter(period != "After",
+         season == "Spring") %>% 
+  mutate(period = case_when(
+      year < 2001  ~ "Before",
+      year <= 2005 ~ "During",
+      TRUE ~ "After"))
+
+mod_did_pre_spring_mod <- lm(sqrt_cpue ~ treat * period + factor(year), data = pre_aqua_spring_mod)
+
+# plot(mod_did_pre_spring, which = 1)  # Residuals vs fitted
+# plot(mod_did_pre_spring, which = 2)  # QQ-plot
+# plot(mod_did_pre_spring, which = 4)  # Cook's distance
+# durbinWatsonTest(mod_did_pre_spring) # Autocorrelation
+summary(mod_did_pre_spring_mod)
+```
+
+
+
+
+
 Add buffer period
 
 ## Before and After
-
+### Fall
 ```{r}
 all_aqua_fall <- mean_cpue %>% 
   filter(season == "Fall")
@@ -333,6 +375,8 @@ mod_did_all_fall <- lm(sqrt_cpue ~ treat * period, data = all_aqua_fall)
 # durbinWatsonTest(mod_did_all_fall)
 summary(mod_did_all_fall)
 ```
+
+### Spring
 ```{r}
 all_aqua_spring <- mean_cpue %>% 
   filter(season == "Spring")
@@ -345,6 +389,40 @@ mod_did_all_spring <- lm(sqrt_cpue ~ treat * period + factor(year), data = all_a
 # durbinWatsonTest(mod_did_all_spring)
 summary(mod_did_all_spring)
 ```
+```{r}
+all_aqua_fall_mod <- mean_cpue %>%
+  filter(season == "Fall") %>% 
+  mutate(period = case_when(
+      year < 2001  ~ "Before",
+      year <= 2005 ~ "During",
+      TRUE ~ "After"))
+
+mod_did_all_fall_mod <- lm(sqrt_cpue ~ treat * period + factor(year), data = all_aqua_fall_mod)
+
+# plot(mod_did_pre_spring, which = 1)  # Residuals vs fitted
+# plot(mod_did_pre_spring, which = 2)  # QQ-plot
+# plot(mod_did_pre_spring, which = 4)  # Cook's distance
+# durbinWatsonTest(mod_did_pre_spring) # Autocorrelation
+summary(mod_did_all_fall_mod)
+```
+
+```{r}
+all_aqua_spring_mod <- mean_cpue %>%
+  filter(season == "Spring") %>% 
+  mutate(period = case_when(
+      year < 2001  ~ "Before",
+      year <= 2005 ~ "During",
+      TRUE ~ "After"))
+
+mod_did_all_spring_mod <- lm(sqrt_cpue ~ treat * period + factor(year), data = all_aqua_spring_mod)
+
+# plot(mod_did_pre_spring, which = 1)  # Residuals vs fitted
+# plot(mod_did_pre_spring, which = 2)  # QQ-plot
+# plot(mod_did_pre_spring, which = 4)  # Cook's distance
+# durbinWatsonTest(mod_did_pre_spring) # Autocorrelation
+summary(mod_did_all_spring_mod)
+```
+
 
 ```{r}
 # post_aqua %>%
@@ -380,8 +458,7 @@ However, the study still faces an important structural limitation: the experimen
 Despite this limitation, the combination of visualization, BACI modeling, parallel trends testing, and Difference-in-Differences analysis provides a coherent and transparent evaluation of the aquaculture experiment.
 
 Overall, the results illustrate how combining BACI designs with a DiD framework can strengthen causal interpretation in ecological impact studies. While the analysis is limited by the presence of only a single treatment lake, the parallel trends test and the separation of during- and post-treatment periods provide a more transparent evaluation of how aquaculture activity may influence fish community dynamics.
-=======
-```
+
 
 ## Difference-in-Differences
 
