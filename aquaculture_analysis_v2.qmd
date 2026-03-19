@@ -55,7 +55,7 @@ Key variables include:
 -   period - before, during, and after aquaculture
 
 -   season - spring or fall sampling
-=======
+
 ## Data Wrangling
 
 ```{r}
@@ -72,7 +72,9 @@ aquaculture <- minnows %>%
     fathead_minnow = f209,
     pearl_dace     = f214,
     slimy_sculpin  = f382
-  ) %>%
+  )  %>%
+  # Drop na values from minnow column 
+  drop_na(minnows) %>% 
   # Adding treatment column
   mutate(
     treat = case_when(lake == 375 ~ 1, TRUE ~ 0),
@@ -85,9 +87,8 @@ aquaculture <- minnows %>%
     season = case_when(season == "aSpring" ~ "Spring",
                        season == "zFall" ~ "Fall"),
   # Always order from Fall to Spring 
-    season = fct_relevel(season, "Fall", "Spring")) %>%
-  # Drop na values from minnow column 
-  drop_na(minnows)
+    season = fct_relevel(season, "Fall", "Spring"),
+  sqrt_cpue = sqrt(minnows))
 
 # Mean cpue per lake/year/season, sqrt-transformed
 mean_cpue <- aquaculture %>%
@@ -287,7 +288,7 @@ In addition, the post-treatment period is divided into two phases: the active aq
 ### Fall
 
 ```{r}
-pre_aqua_fall <- mean_cpue %>%
+pre_aqua_fall <- aquaculture %>%
   filter(period != "After",
          season == "Fall")
 
@@ -302,9 +303,9 @@ summary(mod_did_pre_fall)
 
 The interaction coefficient in this model is positive and marginally significant, suggesting that minnow CPUE increased in the treated lake during aquaculture operations relative to the control lake.
 
- ### Spring
+### Spring
 ```{r}
-pre_aqua_spring <- mean_cpue %>%
+pre_aqua_spring <- aquaculture %>%
   filter(period != "After",
          season == "Spring")
 
@@ -320,51 +321,61 @@ summary(mod_did_pre_spring)
 Adjusting the window
 
 ```{r}
-pre_aqua_fall_mod <- mean_cpue %>%
-  filter(period != "After",
-         season == "Fall") %>% 
+pre_aqua_fall_mod <- aquaculture %>% 
   mutate(period = case_when(
-      year < 2001  ~ "Before",
-      year <= 2005 ~ "During",
-      TRUE ~ "After"))
+      year < 1996  ~ "Before",
+      year <= 2004 ~ "During",
+      TRUE ~ "After")) %>%
+  filter(period != "After",
+         season == "Fall") 
 
 mod_did_pre_fall_mod <- lm(sqrt_cpue ~ treat * period + factor(year), data = pre_aqua_fall_mod)
 
-# plot(mod_did_pre_spring, which = 1)  # Residuals vs fitted
-# plot(mod_did_pre_spring, which = 2)  # QQ-plot
-# plot(mod_did_pre_spring, which = 4)  # Cook's distance
-# durbinWatsonTest(mod_did_pre_spring) # Autocorrelation
 summary(mod_did_pre_fall_mod)
 ```
 
 ```{r}
-pre_aqua_spring_mod <- mean_cpue %>%
-  filter(period != "After",
-         season == "Spring") %>% 
+pre_aqua_spring_mod <- aquaculture %>% 
   mutate(period = case_when(
-      year < 2001  ~ "Before",
-      year <= 2005 ~ "During",
-      TRUE ~ "After"))
+      year < 1996  ~ "Before",
+      year <= 2004 ~ "During",
+      TRUE ~ "After")) %>%
+  filter(period != "After",
+         season == "Spring") 
 
 mod_did_pre_spring_mod <- lm(sqrt_cpue ~ treat * period + factor(year), data = pre_aqua_spring_mod)
 
-# plot(mod_did_pre_spring, which = 1)  # Residuals vs fitted
-# plot(mod_did_pre_spring, which = 2)  # QQ-plot
-# plot(mod_did_pre_spring, which = 4)  # Cook's distance
-# durbinWatsonTest(mod_did_pre_spring) # Autocorrelation
 summary(mod_did_pre_spring_mod)
 ```
 
+#### Buffer
 
+```{r}
+pre_aqua_fall_buff <- aquaculture %>%
+  filter(period != "After",
+         season == "Fall",
+         year != 2003 & year != 2008) # Remove year aquaculture began and ended
 
+mod_did_pre_fall_buff <- lm(sqrt_cpue ~ treat * period + factor(year), data = pre_aqua_fall_buff)
 
+summary(mod_did_pre_fall_buff)
+```
 
-Add buffer period
+```{r}
+pre_aqua_spring_buff <- aquaculture %>%
+  filter(period != "After",
+         season == "Spring",
+         year != 2003 & year != 2008)
+
+mod_did_pre_spring_buff <- lm(sqrt_cpue ~ treat * period + factor(year), data = pre_aqua_spring_buff)
+
+summary(mod_did_pre_spring_buff)
+```
 
 ## Before and After
 ### Fall
 ```{r}
-all_aqua_fall <- mean_cpue %>% 
+all_aqua_fall <- aquaculture %>% 
   filter(season == "Fall")
 
 mod_did_all_fall <- lm(sqrt_cpue ~ treat * period, data = all_aqua_fall)
@@ -378,7 +389,7 @@ summary(mod_did_all_fall)
 
 ### Spring
 ```{r}
-all_aqua_spring <- mean_cpue %>% 
+all_aqua_spring <- aquaculture %>% 
   filter(season == "Spring")
 
 mod_did_all_spring <- lm(sqrt_cpue ~ treat * period + factor(year), data = all_aqua_spring)
@@ -389,40 +400,58 @@ mod_did_all_spring <- lm(sqrt_cpue ~ treat * period + factor(year), data = all_a
 # durbinWatsonTest(mod_did_all_spring)
 summary(mod_did_all_spring)
 ```
+### Robustness Check
+Adjusting the window
+
 ```{r}
-all_aqua_fall_mod <- mean_cpue %>%
+all_aqua_fall_mod <- aquaculture %>%
   filter(season == "Fall") %>% 
   mutate(period = case_when(
-      year < 2001  ~ "Before",
-      year <= 2005 ~ "During",
+      year < 1996  ~ "Before",
+      year <= 2004 ~ "During",
       TRUE ~ "After"))
 
 mod_did_all_fall_mod <- lm(sqrt_cpue ~ treat * period + factor(year), data = all_aqua_fall_mod)
 
-# plot(mod_did_pre_spring, which = 1)  # Residuals vs fitted
-# plot(mod_did_pre_spring, which = 2)  # QQ-plot
-# plot(mod_did_pre_spring, which = 4)  # Cook's distance
-# durbinWatsonTest(mod_did_pre_spring) # Autocorrelation
 summary(mod_did_all_fall_mod)
 ```
 
+
 ```{r}
-all_aqua_spring_mod <- mean_cpue %>%
+all_aqua_spring_mod <- aquaculture %>%
   filter(season == "Spring") %>% 
   mutate(period = case_when(
-      year < 2001  ~ "Before",
-      year <= 2005 ~ "During",
+      year < 1996  ~ "Before",
+      year <= 2004 ~ "During",
       TRUE ~ "After"))
 
 mod_did_all_spring_mod <- lm(sqrt_cpue ~ treat * period + factor(year), data = all_aqua_spring_mod)
 
-# plot(mod_did_pre_spring, which = 1)  # Residuals vs fitted
-# plot(mod_did_pre_spring, which = 2)  # QQ-plot
-# plot(mod_did_pre_spring, which = 4)  # Cook's distance
-# durbinWatsonTest(mod_did_pre_spring) # Autocorrelation
 summary(mod_did_all_spring_mod)
 ```
+#### Buffer
 
+```{r}
+all_aqua_fall_buff <- aquaculture %>%
+  filter(period != "After",
+         season == "Fall",
+         year != 2003 & year != 2008) # Remove year aquaculture began and ended
+
+mod_did_all_fall_buff <- lm(sqrt_cpue ~ treat * period + factor(year), data = all_aqua_fall_buff)
+
+summary(mod_did_all_fall_buff)
+```
+
+```{r}
+all_aqua_spring_buff <- aquaculture %>%
+  filter(period != "After",
+         season == "Spring",
+         year != 2003 & year != 2008) # Remove year aquaculture began and ended
+
+mod_did_all_spring_buff <- lm(sqrt_cpue ~ treat * period + factor(year), data = all_aqua_spring_buff)
+
+summary(mod_did_all_spring_buff)
+```
 
 ```{r}
 # post_aqua %>%
@@ -458,54 +487,4 @@ However, the study still faces an important structural limitation: the experimen
 Despite this limitation, the combination of visualization, BACI modeling, parallel trends testing, and Difference-in-Differences analysis provides a coherent and transparent evaluation of the aquaculture experiment.
 
 Overall, the results illustrate how combining BACI designs with a DiD framework can strengthen causal interpretation in ecological impact studies. While the analysis is limited by the presence of only a single treatment lake, the parallel trends test and the separation of during- and post-treatment periods provide a more transparent evaluation of how aquaculture activity may influence fish community dynamics.
-
-
-## Difference-in-Differences
-
-### Before and During
-
-```{r}
-pre_aqua <- mean_cpue %>%
-  filter(period != "After")
-
-mod_did_pre <- lm(sqrt_cpue ~ treat * period + season, data = pre_aqua)
-
-plot(mod_did_pre, which = 1)  # Residuals vs fitted
-plot(mod_did_pre, which = 2)  # QQ-plot
-plot(mod_did_pre, which = 4)  # Cook's distance
-durbinWatsonTest(mod_did_pre) # Autocorrelation
-summary(mod_did_pre)
-```
-
-### During and After
-
-```{r}
-post_aqua <- mean_cpue %>%
-  filter(period != "Before")
-
-mod_did_post <- lm(sqrt_cpue ~ treat * period + season, data = post_aqua)
-
-plot(mod_did_post, which = 1)
-plot(mod_did_post, which = 2)
-plot(mod_did_post, which = 4)
-durbinWatsonTest(mod_did_post)
-summary(mod_did_post)
-```
-
-```{r}
-post_aqua %>%
-  ggplot(aes(x = year, y = mean_cpue,
-             color = factor(treat), linetype = factor(treat))) +
-  geom_line() +
-  geom_point() +
-  scale_color_manual(values = c("black", "red"),
-                     labels = c("Control", "Treated")) +
-  scale_linetype_manual(values = c("dashed", "solid"),
-                        labels = c("Control", "Treated")) +
-  facet_wrap(~ season, scales = "free_y") +
-  labs(x = "Year", y = "Mean cpue (fish per net days)",
-       color = "Lake", linetype = "Lake",
-       title = "Post-treatment trends") +
-  theme_classic()
-```
 
